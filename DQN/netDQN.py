@@ -53,12 +53,12 @@ class Crop(nn.Module):
         )
 
 class DQN(nn.Module):
-    def __init__(self, embedding_dim=32, crop_dim=9, num_layers=5):
+    def __init__(self, embedding_dim=32, crop_dim=9, num_layers=5, num_actions = 8):
         super(DQN, self).__init__()
 
         self.glyph_shape = (21, 79)
         self.blstats_shape = 26
-        self.num_actions = 8
+        self.num_actions = num_actions
         self.h = self.glyph_shape[0]
         self.w = self.glyph_shape[1]
         self.k_dim = embedding_dim

@@ -10,6 +10,9 @@ from torch.nn import functional as F
 from DQN.netDQN import DQN
 from DQN.replaybuffer import Replaybuffer
 
+from torch.utils.tensorboard import SummaryWriter
+
+
 # First, we use state just glyphs
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -17,17 +20,33 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 class Agent():
     
     def __init__(self, FLAGS = None):
+
+        MOVE_ACTIONS = (nethack.CompassDirection.N,
+                    nethack.CompassDirection.E,
+                    nethack.CompassDirection.S,
+                    nethack.CompassDirection.W)
+
+        self.env = gym.make(
+            id = "MiniHack-Room-5x5-v0",
+            observation_keys = ("glyphs","chars","colors","specials","blstats","message"),
+            actions =  MOVE_ACTIONS)
+
+        self.writer = SummaryWriter()
         
         if FLAGS.mode == "test":
-            print("DQN/model/" + FLAGS.model_dir)
-            self.policy = torch.load("DQN/model/" + FLAGS.model_dir)
+            print("DQN/" + FLAGS.model_dir)
+            self.policy = torch.load("DQN/" + FLAGS.model_dir)
             self.episode = FLAGS.episodes
             self.print_freq = FLAGS.print_freq
+            self.eps_start = FLAGS.eps_start
+            self.eps_end = FLAGS.eps_end
+            eps_fraction = 0.3
+            self.eps_timesteps = eps_fraction * float(self.episode)
         else:   
             # policy network
-            self.policy = DQN().to(device)
+            self.policy = DQN(num_actions= self.env.action_space.n).to(device)
             # target network
-            self.target = DQN().to(device)
+            self.target = DQN(num_actions= self.env.action_space.n).to(device)
         
             # initial optimize
             self.optimizer = torch.optim.Adam(self.policy.parameters())
@@ -44,6 +63,7 @@ class Agent():
             self.save_freq = FLAGS.save_freq
             eps_fraction = 0.3
             self.eps_timesteps = eps_fraction * float(self.episode)
+            self.model_num = FLAGS.model_num
 
             # 사용할 함수 
             self.eps_threshold(epi_num = 1)
@@ -87,9 +107,8 @@ class Agent():
 
 
     def train(self):
-
-        # env = gym.make(id = "MiniHack-ETest-v0", observation_keys = ("glyphs","chars","colors","specials","blstats","message"))
-        env = gym.make(id = "MiniHack-Room-5x5-v0", observation_keys = ("glyphs","chars","colors","specials","blstats","message"))
+       
+        env = self.env 
 
         e_rewards = [0.0]
         eps_threshold = 0
@@ -138,25 +157,31 @@ class Agent():
                 print("mean 100 episode reward: {}".format(round(np.mean(e_rewards[-101:-1]), 2)))
                 print("% time spend exploring: {}".format(int(100 * eps_threshold)))
                 print("************************************************")
+                
+                self.writer.add_scalar("mean_reward", round(np.mean(e_rewards[-101:-1]), 2), len(e_rewards) / 25)
+                self.writer.add_scalar("mean_steps", steps / 25, len(e_rewards) / 25)
 
                 steps = 0
             #model save 
+            # print("DQN/{}/model".format(self.model_num))
             if len(e_rewards) % self.save_freq == 0:
-                torch.save(self.policy, "DQN/model/model" + str(len(e_rewards)))
+                torch.save(self.policy, "DQN/{}/model".format(self.model_num) + str(len(e_rewards)))
 
+            
 
     def test(self, random_ex = False):
-        pass
-        env = gym.make(id = "MiniHack-Room-5x5-v0", observation_keys = ("glyphs","chars","colors","specials","blstats","message"))
 
+        actions = []
+        env = self.env
         e_rewards = [0.0]
         eps_threshold = 0
         tot_steps = 0
+        steps = 0
 
         for epi in range(self.episode):
             done = False
             state = env.reset() # each reset generates a new environment instance
-            steps= 0        
+            # steps= 0        
             
             while not done:
                 steps += 1
@@ -172,28 +197,37 @@ class Agent():
                 else:
                     action = self.get_action(state)
                 
-
+                actions.append(action)
                 
                 new_state, reward, done, info =  env.step(action)
                 state = new_state
 
                 e_rewards[-1] += reward
-                print("Episode: ", epi, "  / step: ", tot_steps, "\tAction Taken: ", str(action) )
-                env.render("human")
-
+                # print("Episode: ", epi, "  / step: ", tot_steps, "\tAction Taken: ", str(action) )
+                # env.render("human")
+                # if action != 1:
+                #     print("action: ", action)
+            
+            
+            if steps < 40:
+                print("done: ", done)
+                print(actions)
+            
+            actions = []
 
             # 한번 episode 시행 후------------------------------------------------------------------------------------
             e_rewards.append(0.0)
-
+            # print("steps: {} and tot_steps: {}".format(steps, tot_steps))
+            # break
             #logging
             if len(e_rewards) % self.print_freq == 0 :
+
                 print("************************************************")
-                print("steps: {} and tot_steps: {}".format(steps, tot_steps))
+                print("means_steps: {} and tot_steps: {}".format(steps/25, tot_steps))
                 print("num_episodes: {}".format(len(e_rewards)))
                 print("mean 100 episode reward: {}".format(round(np.mean(e_rewards[-101:-1]), 2)))
-                # print("% time spend exploring: {}".format(int(100 * eps_threshold)))
                 print("************************************************")
-
+                steps = 0
 
 
 
