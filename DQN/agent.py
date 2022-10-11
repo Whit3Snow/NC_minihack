@@ -27,7 +27,7 @@ class Agent():
                     nethack.CompassDirection.W)
 
         self.env = gym.make(
-            id = "MiniHack-Room-5x5-v0",
+            id = FLAGS.env,
             observation_keys = ("glyphs","chars","colors","specials","blstats","message"),
             actions =  MOVE_ACTIONS)
 
@@ -47,13 +47,13 @@ class Agent():
             self.policy = DQN(num_actions= self.env.action_space.n).to(device)
             # target network
             self.target = DQN(num_actions= self.env.action_space.n).to(device)
-        
+            
             # initial optimize
-            self.optimizer = torch.optim.Adam(self.policy.parameters())
+            self.optimizer = torch.optim.Adam(self.policy.parameters(), lr = FLAGS.lr)
 
             self.buffer = Replaybuffer()
 
-            self.gamma = 0.9
+            self.gamma = 0.999
             self.batch_size = 32
             self.target_update = 50
             self.episode = FLAGS.episodes
@@ -101,9 +101,13 @@ class Agent():
         q_curr = q_curr.gather(1, action).squeeze()
 
         loss = F.smooth_l1_loss(q_curr, q_target)
+
+        # self.writer.add_scalar("loss ", loss, )
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
+
+        return loss 
 
 
     def train(self):
@@ -114,6 +118,7 @@ class Agent():
         eps_threshold = 0
         tot_steps = 0
         steps = 0
+        loss = 0
 
         for epi in range(self.episode):
             done = False
@@ -138,7 +143,7 @@ class Agent():
                 state = new_state
 
                 if self.buffer.len() > self.batch_size:
-                    self.update()
+                    loss += self.update()
                 
                 # target network update 
                 if epi % self.target_update == 0:
@@ -160,12 +165,16 @@ class Agent():
                 
                 self.writer.add_scalar("mean_reward", round(np.mean(e_rewards[-101:-1]), 2), len(e_rewards) / 25)
                 self.writer.add_scalar("mean_steps", steps / 25, len(e_rewards) / 25)
-
+                self.writer.add_scalar("mean_loss", loss / 25, len(e_rewards) / 25)
                 steps = 0
+                loss = 0
             #model save 
             # print("DQN/{}/model".format(self.model_num))
             if len(e_rewards) % self.save_freq == 0:
                 torch.save(self.policy, "DQN/{}/model".format(self.model_num) + str(len(e_rewards)))
+            
+            self.writer.close()
+
 
             
 
@@ -178,6 +187,7 @@ class Agent():
         tot_steps = 0
         steps = 0
 
+
         for epi in range(self.episode):
             done = False
             state = env.reset() # each reset generates a new environment instance
@@ -186,7 +196,6 @@ class Agent():
             while not done:
                 steps += 1
                 tot_steps += 1
-
                 # step
                 if random_ex:
                     eps_threshold = self.eps_threshold(epi)
@@ -208,7 +217,8 @@ class Agent():
                 # if action != 1:
                 #     print("action: ", action)
             
-            
+
+  
             if steps < 40:
                 print("done: ", done)
                 print(actions)

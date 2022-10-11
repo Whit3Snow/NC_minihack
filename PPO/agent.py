@@ -7,10 +7,11 @@ from collections import deque
 from nle import nethack
 
 from torch.nn import functional as F
-from DQN.netDQN import DQN
-from DQN.replaybuffer import Replaybuffer
+from netPPO import PPO
+from replaybuffer import Replaybuffer
 
 from torch.utils.tensorboard import SummaryWriter
+from torch.distributions import Categorical
 
 
 # First, we use state just glyphs
@@ -31,42 +32,39 @@ class Agent():
             observation_keys = ("glyphs","chars","colors","specials","blstats","message"),
             actions =  MOVE_ACTIONS)
 
-        self.writer = SummaryWriter()
+        # self.writer = SummaryWriter()
         
-        if FLAGS.mode == "test":
-            print("DQN/" + FLAGS.model_dir)
-            self.policy = torch.load("DQN/" + FLAGS.model_dir)
-            self.episode = FLAGS.episodes
-            self.print_freq = FLAGS.print_freq
-            self.eps_start = FLAGS.eps_start
-            self.eps_end = FLAGS.eps_end
-            eps_fraction = 0.3
-            self.eps_timesteps = eps_fraction * float(self.episode)
-        else:   
-            # policy network
-            self.policy = DQN(num_actions= self.env.action_space.n).to(device)
-            # target network
-            self.target = DQN(num_actions= self.env.action_space.n).to(device)
+        # if FLAGS.mode == "test":
+        #     print("DQN/" + FLAGS.model_dir)
+        #     self.policy = torch.load("DQN/" + FLAGS.model_dir)
+        #     self.episode = FLAGS.episodes
+        #     self.print_freq = FLAGS.print_freq
+        #     self.eps_start = FLAGS.eps_start
+        #     self.eps_end = FLAGS.eps_end
+        #     eps_fraction = 0.3
+        #     self.eps_timesteps = eps_fraction * float(self.episode)
+        # else:   
+        #     # actor network
+        #     self.actor = PPO(num_actions= self.env.action_space.n).to(device)
+        #     # critic network
+        #     self.critic = PPO(num_actions= self.env.action_space.n).to(device)
         
-            # initial optimize
-            self.optimizer = torch.optim.Adam(self.policy.parameters())
+        #     # initial optimize
+        #     self.optimizer = torch.optim.Adam(self.policy.parameters())
 
-            self.buffer = Replaybuffer()
+        #     self.buffer = Replaybuffer()
 
-            self.gamma = 0.9
-            self.batch_size = 32
-            self.target_update = 50
-            self.episode = FLAGS.episodes
-            self.eps_start = FLAGS.eps_start
-            self.eps_end = FLAGS.eps_end
-            self.print_freq = FLAGS.print_freq
-            self.save_freq = FLAGS.save_freq
-            eps_fraction = 0.3
-            self.eps_timesteps = eps_fraction * float(self.episode)
-            self.model_num = FLAGS.model_num
+        #     self.gamma = 0.9
+        #     self.batch_size = 32
+        #     self.target_update = 50
+        #     self.episode = FLAGS.episodes
+           
+        #     self.print_freq = FLAGS.print_freq
+        #     self.save_freq = FLAGS.save_freq
+        #     self.model_num = FLAGS.model_num
 
-            # 사용할 함수 
-            self.eps_threshold(epi_num = 1)
+        #     # 사용할 함수 
+        #     self.eps_threshold(epi_num = 1)
 
 
         
@@ -81,10 +79,9 @@ class Agent():
         observed_stats = torch.from_numpy(obs['blstats']).float().unsqueeze(0).to(device)
 
         with torch.no_grad():
-            q = self.policy(observed_glyphs,observed_stats)
+            q = self.policy.forward(observed_glyphs,observed_stats)
         
-        _, action = q.max(1) # 가장 좋은 action 뽑기 
-        return action.item()
+        print(q)
 
     def update(self):
         gly, bls, next_gly, next_bls, action, reward, done = self.buffer.sample(self.batch_size)
@@ -169,14 +166,19 @@ class Agent():
 
             
 
-    def test(self, random_ex = False):
+    def test(self):
         pass
-
-
-
-
-
         
+        env = self.env 
+        state = env.reset()
+        action = self.get_action(state)
+        # new_state, reward, done, info =  env.step(action)
+
+
+
+
+agent = Agent()
+agent.test()
     
 
 
