@@ -133,7 +133,7 @@ class PPO(nn.Module):
             nn.Linear(self.h_dim, self.h_dim),
             nn.ReLU(),
             nn.Linear(self.h_dim, self.num_actions),
-            nn.Softmax(dim = -1)
+            nn.Softmax(dim = -1) # agent가 각 행동을 취할 probability가 나오게 됨. 
         )
 
         self.fc_critic = nn.Sequential(
@@ -175,8 +175,10 @@ class PPO(nn.Module):
         
         st = torch.cat(reps, dim=1)
         st = self.fc(st)
+
+        dist = Categorical(st)
         
-        return st
+        return dist
     
     def forward_critic(self, observed_glyphs, observed_stats):
         # assert 1 == 3

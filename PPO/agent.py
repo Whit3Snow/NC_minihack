@@ -8,7 +8,7 @@ from nle import nethack
 
 from torch.nn import functional as F
 from netPPO import PPO
-from replaybuffer import Replaybuffer
+from memory import Memory
 
 from torch.utils.tensorboard import SummaryWriter
 from torch.distributions import Categorical
@@ -25,12 +25,19 @@ class Agent():
         MOVE_ACTIONS = (nethack.CompassDirection.N,
                     nethack.CompassDirection.E,
                     nethack.CompassDirection.S,
-                    nethack.CompassDirection.W)
+                    nethack.CompassDirection.W,)
+                    # nethack.CompassDirection.NE)
+                    
 
+        # self.env = gym.vector.make(
+        #     id = "MiniHack-Room-5x5-v0",
+        #     observation_keys = ("glyphs","blstats"),
+        #     actions =  MOVE_ACTIONS,
+        #     num_envs = 3)
         self.env = gym.make(
             id = "MiniHack-Room-5x5-v0",
-            observation_keys = ("glyphs","chars","colors","specials","blstats","message"),
-            actions =  MOVE_ACTIONS)
+            observation_keys = ("glyphs","blstats"),
+            actions =  MOVE_ACTIONS,)
 
         # self.writer = SummaryWriter()
         
@@ -62,16 +69,32 @@ class Agent():
         #     self.print_freq = FLAGS.print_freq
         #     self.save_freq = FLAGS.save_freq
         #     self.model_num = FLAGS.model_num
+   
 
-        #     # 사용할 함수 
-        #     self.eps_threshold(epi_num = 1)
-
-
+        # # actor network 
+        # self.actor = PPO(num_actions= self.env.action_space.nvec[0]).to(device)
+        # # critic network
+        # self.critic = PPO(num_actions= self.env.action_space.nvec[0]).to(device)
         
-    def eps_threshold(self, epi_num):
+        # actor network 
+        self.actor = PPO(num_actions= self.env.action_space.n).to(device)
+        # critic network
+        self.critic = PPO(num_actions= self.env.action_space.n).to(device)
 
-        fraction = min(1.0, float(epi_num) / self.eps_timesteps)
-        return self.eps_start + fraction * (self.eps_end - self.eps_start)
+        self.memory = Memory()
+ 
+
+
+        self.actor.optimizer = torch.optim.Adam(self.actor.parameters())
+        self.critic.optimizer = torch.optim.Adam(self.critic.parameters())
+
+        self.gamma = 0.9
+        self.lmbda = 0.7
+        self.episode = 3
+
+        # initial optimize
+        self.optimizer = torch.optim.Adam(self.actor.parameters(), lr = 1e-4)
+
 
     def get_action(self, obs):
 
@@ -79,28 +102,80 @@ class Agent():
         observed_stats = torch.from_numpy(obs['blstats']).float().unsqueeze(0).to(device)
 
         with torch.no_grad():
-            q = self.policy.forward(observed_glyphs,observed_stats)
+            q = self.actor.forward(observed_glyphs,observed_stats)  
+
+        print("sample: ", q.sample())
+        print("item: ", q.sample().item())
+
+        return q.sample()
+
+
+
+    def calc_advantage(self, gly, bls, next_gly, next_bls, action, reward, done_mask):
+
+        values = self.critic.forward_critic(gly, bls).detach()
+        td_target = reward + self.gamma * self.critic.forward_critic(next_gly, next_bls) * done_mask
+        delta = td_target - values
+        delta = delta.detach().cpu().numpy()
+        advantage_lst = []
+        advantage = 0.0 
+
+        # delta = [[0.02968087] [0.02968087] [0.03968087]] ==> batch_size 
+
         
-        print(q)
+        for idx in reversed(range(len(delta))):
+            advantage = self.gamma * self.lmbda * advantage + delta[idx][0]
+            advantage_lst.append([advantage])
+            print(advantage)    
+        
+        advantage_lst.reverse()
+        advantages = torch.tensor(advantage_lst, dtype=torch.float).to(device)
+        return values + advantages, advantages
+        #values는 critic 모델
+        #return = values + advantages
+
+    def mini_batch(self):
+        
+        return 
 
     def update(self):
-        gly, bls, next_gly, next_bls, action, reward, done = self.buffer.sample(self.batch_size)
-        
-        with torch.no_grad():
-            q_next = self.policy(next_gly, next_bls) # batch * action_n
-            _, action_next = q_next.max(1) # batch
-            q_next_max = self.target(next_gly, next_bls) # batch * action_n
-            q_next_max = q_next_max.gather(1, action_next.unsqueeze(1)).squeeze() # #batch
-    
+        batch_size = 3
+        clip_param = 0.3
+        CRITIC_DISCOUNT = 0.5
+        ENTROPY_BETA = 0.001
 
-        q_target = reward.squeeze() + (1 - done.squeeze()) * self.gamma * q_next_max
-        q_curr = self.policy(gly, bls)
-        q_curr = q_curr.gather(1, action).squeeze()
 
-        loss = F.smooth_l1_loss(q_curr, q_target)
-        self.optimizer.zero_grad()
-        loss.backward()
-        self.optimizer.step()
+        gly, bls, next_gly, next_bls, action, reward, log_prob, done_mask, batches = self.memory.sample(batch_size)
+        returns, advantages = self.calc_advantage(gly, bls, next_gly, next_bls, action, reward, done_mask)
+
+        PPO_epochs = 3
+        for i in range(PPO_epochs):
+      
+            for batch in batches:       
+                gly, bls, action, old_log_probs, return_, advantage = gly[batch], bls[batch], action[batch], log_prob[batch], returns[batch], advantages[batch]
+                
+                dist = self.actor.forward(gly, bls)
+                entropy = dist.entropy().mean()
+                new_probs = dist.log_prob(action)
+
+                ratio = (new_probs - old_log_probs).exp()
+
+                surr1 = ratio * advantage
+                surr2 = torch.clamp(ratio, 1.0 - clip_param, 1.0 + clip_param) * advantage
+
+                actor_loss = -torch.min(surr1, surr2).mean()
+
+                value = self.critic.forward_critic(gly, bls).float()
+                critic_loss = (return_ - value).pow(2).mean()
+
+                loss = CRITIC_DISCOUNT * critic_loss + actor_loss - ENTROPY_BETA * entropy
+                
+                
+                self.optimizer.zero_grad()
+                loss.backward()
+                self.optimizer.step()
+
+
 
 
     def train(self):
@@ -112,57 +187,33 @@ class Agent():
         tot_steps = 0
         steps = 0
 
+        n_steps = 0
+        N = 20
+
         for epi in range(self.episode):
             done = False
             state = env.reset() # each reset generates a new environment instance    
             
             while not done:
-                steps += 1
-                tot_steps += 1
-                # step
-                eps_threshold = self.eps_threshold(epi)
-                if random.random() < eps_threshold:
-                    action = env.action_space.sample()
-                else:
-                    action = self.get_action(state)
+                pass
+                n_steps += 1
+                action = self.get_action(state)
+                new_state, reward, done, info =  env.step(action.item())
+
+                observed_glyphs = torch.from_numpy(state['glyphs']).float().unsqueeze(0).to(device)
+                observed_stats = torch.from_numpy(state['blstats']).float().unsqueeze(0).to(device)
+
+                dist = self.actor.forward(observed_glyphs, observed_stats)
+                log_prob = dist.log_prob(action).item()
+                self.memory.cache(state, new_state, action, reward, log_prob, done)
                 
-                new_state, reward, done, info =  env.step(action)
-
-                e_rewards[-1] += reward
-                # save buffer 
-                self.buffer.cache(state, new_state, action, reward, done)
-                # update 
-                state = new_state
-
-                if self.buffer.len() > self.batch_size:
+                if n_steps % N == 0:
+                    print("in there: ", n_steps)
                     self.update()
-                
-                # target network update 
-                if epi % self.target_update == 0:
-                    self.target.load_state_dict(self.policy.state_dict())
 
-
-            # 한번 episode 시행 후, 
-            e_rewards.append(0.0)
-            print("Episode: ", epi, "  / step: ", tot_steps )
-
-            #logging
-            if len(e_rewards) % self.print_freq == 0 :
-                print("************************************************")
-                print("mean_steps: {} and tot_steps: {}".format(steps / 25, tot_steps))
-                print("num_episodes: {}".format(len(e_rewards)))
-                print("mean 100 episode reward: {}".format(round(np.mean(e_rewards[-101:-1]), 2)))
-                print("% time spend exploring: {}".format(int(100 * eps_threshold)))
-                print("************************************************")
-                
-                self.writer.add_scalar("mean_reward", round(np.mean(e_rewards[-101:-1]), 2), len(e_rewards) / 25)
-                self.writer.add_scalar("mean_steps", steps / 25, len(e_rewards) / 25)
-
-                steps = 0
-            #model save 
-            # print("DQN/{}/model".format(self.model_num))
-            if len(e_rewards) % self.save_freq == 0:
-                torch.save(self.policy, "DQN/{}/model".format(self.model_num) + str(len(e_rewards)))
+                state = new_state
+            
+            print("done", "@" * 40)
 
             
 
@@ -171,14 +222,22 @@ class Agent():
         
         env = self.env 
         state = env.reset()
+        #state 형태: key:[[], ... ,[]], key2:[[], ... ,[]], ...
+
+
         action = self.get_action(state)
-        # new_state, reward, done, info =  env.step(action)
+        for i in range(3):
+            new_state, reward, done, info =  env.step(action)
 
+            self.memory.cache(state, new_state, action, reward, done)
+        
+        self.memory.sample(3)
 
+        self.update()
 
 
 agent = Agent()
-agent.test()
+agent.train()
     
 
 
