@@ -33,7 +33,7 @@ class Agent():
         
         # MOVE_ACTIONS = tuple(nethack.CompassDirection)
 
-        self.env = gym.make(
+        self.env = gym.vector.make(
             id = FLAGS.env,
             # observation_keys = ("glyphs","blstats"),
             observation_keys = ("glyphs","chars","colors","specials","blstats","message"),
