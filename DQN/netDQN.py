@@ -7,6 +7,7 @@ from collections import deque
 from nle import nethack
 
 from torch.nn import functional as F
+from torchsummary import summary as summary_
 
 class Crop(nn.Module):
     def __init__(self, height, width, height_target, width_target):
@@ -133,6 +134,14 @@ class DQN(nn.Module):
             nn.ReLU(),
             nn.Linear(self.h_dim, self.num_actions)
         )
+
+        self.fc2 = nn.Sequential(
+            nn.Linear(656, self.h_dim),
+            nn.ReLU(),
+            nn.Linear(self.h_dim, self.h_dim),
+            nn.ReLU(),
+            nn.Linear(self.h_dim, self.num_actions)
+        )
     
     def _select(self, embed, x):
         # Work around slow backward pass of nn.Embedding, see
@@ -143,6 +152,7 @@ class DQN(nn.Module):
     
     def forward(self, observed_glyphs, observed_stats):
         # assert 1 == 3
+        # breakpoint()
         B = observed_glyphs.shape[0]
         blstats_emb = self.embed_blstats(observed_stats)
         reps = [blstats_emb]
@@ -157,13 +167,18 @@ class DQN(nn.Module):
         crop_rep = crop_rep.view(B, -1)
         reps.append(crop_rep)
         
+
+        """ 나중에 맵이 커지면 추가해주기 
         glyphs_emb = self._select(self.embed, observed_glyphs)
         glyphs_emb = glyphs_emb.transpose(1, 3)
         glyphs_rep = self.extract_representation(glyphs_emb)
         glyphs_rep = glyphs_rep.view(B, -1)
-        reps.append(glyphs_rep)
-        
+        # reps.append(glyphs_rep) # 필요없는 정보(환경은 작은데, 정보가 너무 많아서 문제발생)
+        """
+
         st = torch.cat(reps, dim=1)
-        st = self.fc(st)
+        # breakpoint()
+
+        st = self.fc2(st)
         # print("in forward")
         return st

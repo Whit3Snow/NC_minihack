@@ -35,3 +35,19 @@ class Replaybuffer():
 
     def len(self):
         return len(self.buffer)
+
+    def debuger_sample(self, batch_size):
+        pass
+        batch = random.sample(self.buffer, batch_size)
+        gly, bls, next_gly, next_bls, action, reward, done = map(torch.stack, zip(*batch)) 
+        actions = []
+        for i in range(1):
+            answer = [0,2,1,3,2,0,3,1]
+            # random.shuffle(answer)
+            actions.extend(answer)
+
+        actions = torch.LongTensor(actions).to("cuda:0")
+        # print("debuger action list: \n", actions.unsqueeze(1))
+
+        return gly, bls, next_gly, next_bls, actions.unsqueeze(1), reward, done #squeeze? 
+        

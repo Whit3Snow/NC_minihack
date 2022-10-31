@@ -28,6 +28,8 @@ class Memory():
     
     def sample(self, batch_size):
 
+                
+
         batch = random.sample(self.buffer, batch_size)
         gly, bls, next_gly, next_bls, action, reward, log_prob, dones = map(torch.stack, zip(*batch)) 
 
