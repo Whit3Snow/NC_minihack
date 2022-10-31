@@ -152,7 +152,6 @@ class DQN(nn.Module):
     
     def forward(self, observed_glyphs, observed_stats):
         # assert 1 == 3
-        # breakpoint()
         B = observed_glyphs.shape[0]
         blstats_emb = self.embed_blstats(observed_stats)
         reps = [blstats_emb]

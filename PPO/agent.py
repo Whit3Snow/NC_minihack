@@ -223,26 +223,19 @@ class Agent():
 
         for epi in range(self.episode):
             done = False
-            state = env.reset() # each reset generates a new environment instance
-            # steps= 0        
+            state = env.reset() # each reset generates a new environment instance       
             
             while not done:
                 steps += 1
                 tot_steps += 1
                 # step
                 action = self.get_action(state)
-                
                 actions.append(action)
-                
                 new_state, reward, done, info =  env.step(action)
                 state = new_state
 
                 e_rewards[-1] += reward
 
-                # print("Episode: ", epi, "  / step: ", tot_steps, "\tAction Taken: ", str(action) )
-                # env.render("human")
-                # if action != 1:
-                #     print("action: ", action)
             
             actions = []
 
