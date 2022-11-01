@@ -19,7 +19,7 @@ def createFolder(directory):
 
 def main():    
     parser = argparse.ArgumentParser()
-    parser.add_argument('--episodes', default = '50000', type = int, help = '총 step수를 일컬음')
+    parser.add_argument('--episodes', default = '100000', type = int, help = '총 step수를 일컬음')
     parser.add_argument('--mode', default = "test", type = str)
     parser.add_argument('--agent', default = "DQN", type = str)
     parser.add_argument('--eps-start', default = 0.9, type = float, help = "e-greedy 시작 값")

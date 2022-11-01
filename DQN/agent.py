@@ -12,15 +12,12 @@ from DQN.replaybuffer import Replaybuffer
 
 from torch.utils.tensorboard import SummaryWriter
 
-np.set_printoptions(threshold=np.inf, linewidth=np.inf)
-
-
-# First, we use state just glyphs
+np.set_printoptions(threshold=np.inf, linewidth=np.inf) #for debuger
 
 
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-f = open('DQN/output.txt', 'w')
+
 print("device: ",device)
 class Agent():
     
@@ -33,29 +30,34 @@ class Agent():
         
         # MOVE_ACTIONS = tuple(nethack.CompassDirection)
 
-        self.env = gym.vector.make(
-            id = FLAGS.env,
-            # observation_keys = ("glyphs","blstats"),
-            observation_keys = ("glyphs","chars","colors","specials","blstats","message"),
-            actions =  self.MOVE_ACTIONS,)
-            # max_episode_steps = 8)
+       
 
-        self.writer = SummaryWriter()
-        
+        self.writer = SummaryWriter('logs/vector_1')
+        self.flags = FLAGS
+
         if FLAGS.mode == "test":
             print("DQN/" + FLAGS.model_dir)
             self.policy = torch.load("DQN/" + FLAGS.model_dir)
             self.episode = FLAGS.episodes
             self.print_freq = FLAGS.print_freq
-            self.eps_start = FLAGS.eps_start
-            self.eps_end = FLAGS.eps_end
-            eps_fraction = 0.3
-            self.eps_timesteps = eps_fraction * float(self.episode)
-        else:   
+            self.env = gym.make(
+                                id = FLAGS.env,
+                                observation_keys = ("glyphs","blstats"),
+                                actions =  self.MOVE_ACTIONS)
+
+        else: 
+            self.num_envs = 5
+
+            self.env = gym.vector.make(
+                                        id = FLAGS.env,
+                                        observation_keys = ("glyphs","blstats"),
+                                        actions =  self.MOVE_ACTIONS,
+                                        num_envs = self.num_envs)
+  
             # policy network
-            self.policy = DQN(num_actions= self.env.action_space.n, embedding_dim=8).to(device)
+            self.policy = DQN(num_actions= self.env.single_action_space.n, embedding_dim=8).to(device)
             # target network
-            self.target = DQN(num_actions= self.env.action_space.n, embedding_dim=8).to(device)
+            self.target = DQN(num_actions= self.env.single_action_space.n, embedding_dim=8).to(device)
             
             # initial optimize
             self.optimizer = torch.optim.Adam(self.policy.parameters(), lr = FLAGS.lr)
@@ -79,7 +81,7 @@ class Agent():
             # 사용할 함수 
             self.eps_threshold(epi_num = 1)
 
-
+            
         
     def eps_threshold(self, epi_num):
 
@@ -88,23 +90,26 @@ class Agent():
 
     def get_action(self, obs):
 
-        observed_glyphs = torch.from_numpy(obs['glyphs']).float().unsqueeze(0).to(device)
-        observed_stats = torch.from_numpy(obs['blstats']).float().unsqueeze(0).to(device)
+        if self.flags.mode == "test":
+            observed_glyphs = torch.from_numpy(obs['glyphs']).float().unsqueeze(0).to(device)
+            observed_stats = torch.from_numpy(obs['blstats']).float().unsqueeze(0).to(device)
+        else: 
+            observed_glyphs = torch.from_numpy(obs['glyphs']).float().to(device)
+            observed_stats = torch.from_numpy(obs['blstats']).float().to(device)
+
 
         with torch.no_grad():
             q = self.policy(observed_glyphs,observed_stats)
-        # breakpoint()
-        
+
         _, action = q.max(1) # 가장 좋은 action 뽑기 
         # breakpoint()
 
-        return action.item()
+        return action.tolist()
 
     def update(self):
 
         # breakpoint()
-        gly, bls, next_gly, next_bls, action, reward, done = self.buffer.sample(self.batch_size)
-        # gly, bls, next_gly, next_bls, action, reward, done = self.buffer.debuger_sample(self.batch_size)
+        gly, bls, next_gly, next_bls, action, reward, done = self.buffer.sample(self.batch_size * self.num_envs)
       
         with torch.no_grad():
             q_next = self.policy(next_gly, next_bls) # batch * action_n
@@ -133,140 +138,125 @@ class Agent():
         e_rewards = [0.0]
         eps_threshold = 0
         tot_steps = 0
-        steps = 0
+        steps = [0 for i in range(self.num_envs)]
+        step = [1 for i in range(self.num_envs)]
+
+        # breakpoint()
+
+        done_steps = []
         loss = 0
 
-
-        distance = 1
-        distance_step = int(distance * 4/3)
-
-        for epi in range(self.episode):
-            done = False
-
-            # state = env.reset(size = 7, distance = 1) # each reset generates a new environment instance    
-            state = env.reset() # each reset generates a new environment instance    
-            # env.render("human")
-            
-
-            while not done:
-                steps += 1
+        max_step = 30
+        state = env.reset() # each reset generates a new environment instance    
+        
+        epi = 0
+        while True:
+            for i in range(max_step):
                 tot_steps += 1
+
                 # step
                 eps_threshold = self.eps_threshold(epi)
                 if random.random() < eps_threshold:
-                    action = env.action_space.sample()
+                    action = []
+                    for i in range(self.num_envs):
+                        action.append(env.single_action_space.sample())
                 else:
                     action = self.get_action(state)
-                
+               
                 new_state, reward, done, info =  env.step(action)
                 
-                # print("steps_",steps,": ", reward)
-                e_rewards[-1] += reward
-                # save buffer 
+                # for i in range(self.num_envs):
+                #     e_rewards.append(0.0)
+                #     e_rewards[-1] += reward[i]
+
+                # save buffer            
                 self.buffer.cache(state, new_state, action, reward, done)
                 # update 
                 state = new_state
-
-                if self.buffer.len() > self.batch_size:
-                    # breakpoint()
+                    
+                if self.buffer.len() > self.batch_size * self.num_envs:
                     loss += self.update()
                 
                 # target network update 
                 if epi % self.target_update == 0:
                     self.target.load_state_dict(self.policy.state_dict())
 
+                steps = [x + y for x,y in zip(steps, step)] # num_envs
+                done_idx = [i for i,ele in enumerate(done) if ele==True]
+                for i in done_idx:
+                    done_steps.append(steps[i]) #envs에서 done된 것만 step 가져오기
+                    steps[i] = 0 
+                    e_rewards.append(0.0)
+                    e_rewards[-1] += reward[i]
 
-            # 한번 episode 시행 후, 
-            e_rewards.append(0.0)
-            # print("Episode: ", epi, "  / step: ", tot_steps )
-
-            #logging
-            if len(e_rewards) % self.print_freq == 0 :
+            epi += 1
+   
+            if epi % self.print_freq == 0:
                 print("************************************************")
-                print("mean_steps: {} and tot_steps: {}".format(steps / 25, tot_steps))
-                print("num_episodes: {}".format(len(e_rewards)))
+                print("Epi : ", epi)
+                print("mean_steps: {} and tot_steps: {}".format(np.mean(done_steps[-101:-1]), tot_steps))
+                print("rewards_len: {} and epi: {}".format(len(e_rewards), epi))
                 print("mean 100 episode reward: {}".format(round(np.mean(e_rewards[-101:-1]), 2)))
                 print("% time spend exploring: {}".format(int(100 * eps_threshold)))
                 print("************************************************")
-                
-                self.writer.add_scalar("mean_reward", round(np.mean(e_rewards[-101:-1]), 2), len(e_rewards) / 25)
-                self.writer.add_scalar("mean_steps", steps / 25, len(e_rewards) / 25)
-                self.writer.add_scalar("mean_loss", loss / 25, len(e_rewards) / 25)
-                
-                # for curriculum learning 
-                # if (steps / 25) <= distance_step and round(np.mean(e_rewards[-101:-1]), 2) >= 0.9:
-                #     print("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@ change the distance! @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@")
-                #     f.write("change the distance!: ", distance, "  num: ", str(len(e_rewards)))
-                #     distance = distance + 1 if distance < 8 else 8
-                #     distance_step = int(distance * 4/3)
-                
-                steps = 0
-                loss = 0
-                    
+            
+                self.writer.add_scalar("mean_reward", round(np.mean(e_rewards[-101:-1]), 2), epi / self.print_freq)
+                self.writer.add_scalar("mean_steps", np.mean(done_steps[-101:-1]), epi / self.print_freq)
+                self.writer.add_scalar("mean_loss", loss / self.print_freq, epi / self.print_freq)
 
+            loss = 0
+                    
             # model save 
-            if len(e_rewards) % self.save_freq == 0:
-                torch.save(self.policy, "DQN/{}/model".format(self.model_num) + str(len(e_rewards)))
+            if epi % self.save_freq == 0:
+                torch.save(self.policy, "DQN/{}/model".format(self.model_num) + str(epi))
             
             self.writer.close()
-        
-        f.close()
 
 
 
 
-    def test(self, random_ex = False):
-        f = open("glphys.txt", 'w')
+
+
+
+
+
+
+    def test(self):
 
         actions = []
         env = self.env
         e_rewards = [0.0]
-        eps_threshold = 0
         tot_steps = 0
         steps = 0
 
         print("env: ", env)
 
+        # 환경 디버거용
+        # f = open("glphys.txt", 'w')
+        # state = env.reset() # each reset generates a new environment instance
+        # f.write(str(state["glyphs"]))
+        # f.write("#" * 79)
+        # f.write(str(state["blstats"]))
+
 
         for epi in range(self.episode):
             done = False
             state = env.reset() # each reset generates a new environment instance
-            # steps= 0 
-            env.render("human")
-            f.write(str(state["glyphs"]))
-            f.write("#" * 79)
-            f.write(str(state["chars"]))
-            f.write("#" * 79)
-            f.write(str(state["blstats"]))
-
-                   
-            
+            steps= 0 
+            # env.render("human")
+                    
             while not done:
                 steps += 1
                 tot_steps += 1
                 # step
-                if random_ex:
-                    eps_threshold = self.eps_threshold(epi)
-                    if random.random() < eps_threshold:
-                        action = env.action_space.sample()
-                    else:
-                        action = self.get_action(state)
-                else:
-                    action = self.get_action(state)
                 
+                action = self.get_action(state)
                 actions.append(action)
-                
-                new_state, reward, done, info =  env.step(action)
+                new_state, reward, done, info =  env.step(action[0])
                 state = new_state
 
                 e_rewards[-1] += reward
-                # print("Episode: ", epi, "  / step: ", tot_steps, "\tAction Taken: ", str(action) )
-                # env.render("human")
-                # if action != 1:
-                #     print("action: ", action)
             
-
-  
             print(actions, len(actions))
             actions = []
 
