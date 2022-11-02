@@ -13,10 +13,13 @@ class Crop(nn.Module):
     def __init__(self, height, width, height_target, width_target):
         super(Crop, self).__init__()
         
-        self.width = width
-        self.height = height
-        self.width_target = width_target
-        self.height_target = height_target
+        self.width = width # 79
+        self.height = height # 21
+        self.width_target = width_target 
+        self.height_target = height_target # (9X9)
+
+        # (21 * 79 ---> 9 * 9)
+        
         width_grid = self._step_to_range(2 / (self.width - 1), self.width_target)[
                      None, :
                      ].expand(self.height_target, -1)
@@ -114,12 +117,15 @@ class DQN(nn.Module):
         )
 
         out_dim = self.k_dim
+
+        """ 나중에 늘려줘야 하는 부분 full glyph(21 * 79)
         # CNN over full glyph map
-        out_dim += self.h * self.w * Y
+        # out_dim += self.h * self.w * Y
+        """
 
         # CNN crop model.
         out_dim += crop_dim**2 * Y
-
+    
         self.embed_blstats = nn.Sequential(
             nn.Linear(self.blstats_shape, self.k_dim),
             nn.ReLU(),
@@ -135,13 +141,11 @@ class DQN(nn.Module):
             nn.Linear(self.h_dim, self.num_actions)
         )
 
-        self.fc2 = nn.Sequential(
-            nn.Linear(656, self.h_dim),
-            nn.ReLU(),
-            nn.Linear(self.h_dim, self.h_dim),
-            nn.ReLU(),
-            nn.Linear(self.h_dim, self.num_actions)
-        )
+        # LSTM. for memory
+        # self.lstm = nn.LSTM(
+        #     input_size = ,
+        #     hidden_size = ,
+        #     num_layers = ,)
     
     def _select(self, embed, x):
         # Work around slow backward pass of nn.Embedding, see
@@ -165,7 +169,6 @@ class DQN(nn.Module):
         crop_rep = self.extract_crop_representation(crop_emb)
         crop_rep = crop_rep.view(B, -1)
         reps.append(crop_rep)
-        
 
         """ 나중에 맵이 커지면 추가해주기 
         glyphs_emb = self._select(self.embed, observed_glyphs)
@@ -178,6 +181,6 @@ class DQN(nn.Module):
         st = torch.cat(reps, dim=1)
         # breakpoint()
 
-        st = self.fc2(st)
+        st = self.fc(st)
         # print("in forward")
         return st

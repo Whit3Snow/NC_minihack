@@ -267,7 +267,7 @@ class Agent():
             if len(e_rewards) % self.print_freq == 0 :
 
                 print("************************************************")
-                print("means_steps: {} and tot_steps: {}".format(steps/25, tot_steps))
+                print("means_steps: {} and tot_steps: {}".format(steps, tot_steps))
                 print("num_episodes: {}".format(len(e_rewards)))
                 print("mean 100 episode reward: {}".format(round(np.mean(e_rewards[-101:-1]), 2)))
                 print("************************************************")
