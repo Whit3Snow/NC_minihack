@@ -155,12 +155,11 @@ class Agent():
         loss = 0
 
         
-        for epi in range(self.episode):
-            done = False
+        while True:
             state = env.reset(size = 5, distance = 1) # each reset generates a new environment instance    
             # env.render("human")
             print(state["glyphs"])
-            while not done:
+            for epi in range(self.episode)
                 
                 steps += 1
                 tot_steps += 1
