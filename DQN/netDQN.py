@@ -57,7 +57,7 @@ class Crop(nn.Module):
         )
 
 class DQN(nn.Module):
-    def __init__(self, embedding_dim=32, crop_dim=9, num_layers=5, num_actions = 8):
+    def __init__(self, embedding_dim=32, crop_dim=9, num_layers=5, num_actions = 8, use_lstm = True):
         super(DQN, self).__init__()
 
         self.glyph_shape = (21, 79)
@@ -67,6 +67,7 @@ class DQN(nn.Module):
         self.w = self.glyph_shape[1]
         self.k_dim = embedding_dim
         self.h_dim = 128
+        self.use_lstm = use_lstm
 
         self.glyph_crop = Crop(self.h, self.w, crop_dim, crop_dim)
         self.embed = nn.Embedding(nethack.MAX_GLYPH, self.k_dim)
@@ -141,12 +142,32 @@ class DQN(nn.Module):
             nn.Linear(self.h_dim, self.num_actions)
         )
 
-        # LSTM. for memory
-        # self.lstm = nn.LSTM(
-        #     input_size = ,
-        #     hidden_size = ,
-        #     num_layers = ,)
-    
+        """ ********************************************************************* """
+        if use_lstm: 
+            """related lstm"""
+            self.fc = nn.Sequential(
+                nn.Linear(out_dim, self.h_dim),
+                nn.ReLU(),
+                nn.Linear(self.h_dim, self.h_dim),
+                nn.ReLU(),
+            )
+
+            self.p = nn.Linear(self.h_dim, self.num_actions)
+
+            self.hidden_size = self.h_dim
+            self.num_envs = 2
+            (self.h_0, self.c_0) = tuple(
+                torch.zeros(1, self.num_envs, self.hidden_size).to("cuda:0") 
+                for _ in range(2))
+
+
+            # LSTM. for memory
+            self.core = nn.LSTM(
+                input_size = self.h_dim,
+                hidden_size = self.h_dim,
+                num_layers = 1)
+        
+
     def _select(self, embed, x):
         # Work around slow backward pass of nn.Embedding, see
         # https://github.com/pytorch/pytorch/issues/24912
@@ -170,6 +191,7 @@ class DQN(nn.Module):
         crop_rep = crop_rep.view(B, -1)
         reps.append(crop_rep)
 
+
         """ 나중에 맵이 커지면 추가해주기 
         glyphs_emb = self._select(self.embed, observed_glyphs)
         glyphs_emb = glyphs_emb.transpose(1, 3)
@@ -177,10 +199,23 @@ class DQN(nn.Module):
         glyphs_rep = glyphs_rep.view(B, -1)
         # reps.append(glyphs_rep) # 필요없는 정보(환경은 작은데, 정보가 너무 많아서 문제발생)
         """
-
+        
         st = torch.cat(reps, dim=1)
         # breakpoint()
+        if self.use_lstm:
+            
+            # breakpoint()
+            st = self.fc(st)
 
-        st = self.fc(st)
+            # input = sequence_len, batch_size, input_size  --> st
+            st, (self.h_0, self.c_0) = self.core(st.unsqueeze(0), (self.h_0, self.c_0))
+            st = torch.flatten(st, 0, 1)
+            # breakpoint()
+            st = self.p(st)
+            # breakpoint()
+
+        else:
+            st = self.fc(st)
         # print("in forward")
+
         return st

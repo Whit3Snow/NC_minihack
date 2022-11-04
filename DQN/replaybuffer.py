@@ -11,11 +11,11 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 class Replaybuffer():
     
-    def __init__(self):
+    def __init__(self, num_env = 5):
         
         self.buffer = deque(maxlen = 10000)
         self.use_cuda = False
-        self.num_env = 4
+        self.num_env = num_env
 
     def cache(self, state, next_state, action, reward, done): #나중에 **kwargs로 바꿔보기 feat. JHJ
         

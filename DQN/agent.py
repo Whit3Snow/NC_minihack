@@ -46,7 +46,7 @@ class Agent():
                                 actions =  self.MOVE_ACTIONS)
 
         else: 
-            self.num_envs = 5
+            self.num_envs = 2
 
             self.env = gym.vector.make(
                                         id = FLAGS.env,
@@ -62,12 +62,12 @@ class Agent():
             # initial optimize
             self.optimizer = torch.optim.Adam(self.policy.parameters(), lr = FLAGS.lr)
 
-            self.buffer = Replaybuffer()
+            self.buffer = Replaybuffer(num_env = self.num_envs)
 
             self.gamma = 0.99
             # self.gamma = 1 # for debuger
-
-            self.batch_size = 32
+            # self.use_lstm = True
+            self.batch_size = 32 
             self.target_update = 50
             self.episode = FLAGS.episodes
             self.eps_start = FLAGS.eps_start
@@ -80,6 +80,14 @@ class Agent():
 
             # 사용할 함수 
             self.eps_threshold(epi_num = 1)
+
+
+            """ related lstm """
+            # self.hidden_size = 64
+            # (self.h_0, self.c_0) = tuple(
+            # torch.zeros(1, self.num_envs, self.hidden_size)
+            # for _ in range(2))
+
 
             
         
@@ -107,28 +115,30 @@ class Agent():
         return action.tolist()
 
     def update(self):
-
+        loss_arr = []
         # breakpoint()
-        gly, bls, next_gly, next_bls, action, reward, done = self.buffer.sample(self.batch_size * self.num_envs)
-      
-        with torch.no_grad():
-            q_next = self.policy(next_gly, next_bls) # batch * action_n
-            _, action_next = q_next.max(1) # batch
-            q_next_max = self.target(next_gly, next_bls) # batch * action_n
-            q_next_max = q_next_max.gather(1, action_next.unsqueeze(1)).squeeze() # #batch
-    
+        for i in range(self.batch_size):
+            gly, bls, next_gly, next_bls, action, reward, done = self.buffer.sample(self.num_envs)
+        
+            with torch.no_grad():
+                # breakpoint()
+                q_next = self.policy(next_gly, next_bls) # batch * action_n
+                _, action_next = q_next.max(1) # batch
+                q_next_max = self.target(next_gly, next_bls) # batch * action_n
+                q_next_max = q_next_max.gather(1, action_next.unsqueeze(1)).squeeze() # #batch
+        
 
-        q_target = reward.squeeze() + (1 - done.squeeze()) * self.gamma * q_next_max
-        q_curr = self.policy(gly, bls)
-        q_curr = q_curr.gather(1, action).squeeze()
+            q_target = reward.squeeze() + (1 - done.squeeze()) * self.gamma * q_next_max
+            q_curr = self.policy(gly, bls)
+            q_curr = q_curr.gather(1, action).squeeze()
 
-        loss = F.smooth_l1_loss(q_curr.unsqueeze(1), q_target.unsqueeze(1))
+            loss = F.smooth_l1_loss(q_curr.unsqueeze(1), q_target.unsqueeze(1))
+            loss_arr.append(loss)
+            self.optimizer.zero_grad()
+            loss.backward()
+            self.optimizer.step()
 
-        self.optimizer.zero_grad()
-        loss.backward()
-        self.optimizer.step()
-
-        return loss 
+        return sum(loss_arr) / self.batch_size
 
 
     def train(self):
@@ -158,13 +168,16 @@ class Agent():
                 eps_threshold = self.eps_threshold(epi)
                 if random.random() < eps_threshold:
                     action = []
-                    for i in range(self.num_envs):
+                    for j in range(self.num_envs):
                         action.append(env.single_action_space.sample())
                 else:
                     action = self.get_action(state)
-               
-                new_state, reward, done, info =  env.step(action)
                 
+                new_state, reward, done, info =  env.step(action)
+
+                # print("action: ",action)
+                # print("i: ", i)
+            
                 # for i in range(self.num_envs):
                 #     e_rewards.append(0.0)
                 #     e_rewards[-1] += reward[i]
@@ -183,14 +196,14 @@ class Agent():
 
                 steps = [x + y for x,y in zip(steps, step)] # num_envs
                 done_idx = [i for i,ele in enumerate(done) if ele==True]
-                for i in done_idx:
-                    done_steps.append(steps[i]) #envs에서 done된 것만 step 가져오기
-                    steps[i] = 0 
+                for k in done_idx:
+                    done_steps.append(steps[k]) #envs에서 done된 것만 step 가져오기
+                    steps[k] = 0 
                     e_rewards.append(0.0)
-                    e_rewards[-1] += reward[i]
+                    e_rewards[-1] += reward[k]
 
             epi += 1
-   
+            print(epi)
             if epi % self.print_freq == 0:
                 print("************************************************")
                 print("Epi : ", epi)
