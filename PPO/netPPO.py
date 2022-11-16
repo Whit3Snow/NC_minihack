@@ -151,7 +151,7 @@ class PPO(nn.Module):
 
         return out.reshape(x.shape + (-1,))
     
-    def forward(self, observed_glyphs, observed_stats):
+    def forward(self, observed_glyphs, observed_stats, actor):
         # assert 1 == 3
         B = observed_glyphs.shape[0]
         blstats_emb = self.embed_blstats(observed_stats)
@@ -174,35 +174,38 @@ class PPO(nn.Module):
         reps.append(glyphs_rep)
         
         st = torch.cat(reps, dim=1)
-        st = self.fc(st)
 
-        dist = Categorical(st)
-        
-        return dist
+        if actor:
+            actor = self.fc(st)
+            dist = Categorical(actor)
+            return dist
+        else:
+            critic = self.fc_critic(st)
+            return critic
     
-    def forward_critic(self, observed_glyphs, observed_stats):
-        # assert 1 == 3
-        B = observed_glyphs.shape[0]
-        blstats_emb = self.embed_blstats(observed_stats)
-        reps = [blstats_emb]
+    # def forward_critic(self, observed_glyphs, observed_stats):
+    #     # assert 1 == 3
+    #     B = observed_glyphs.shape[0]
+    #     blstats_emb = self.embed_blstats(observed_stats)
+    #     reps = [blstats_emb]
 
-        coordinates = observed_stats[:, :2]
-        observed_glyphs = observed_glyphs.long()
-        crop = self.glyph_crop(observed_glyphs, coordinates)
+    #     coordinates = observed_stats[:, :2]
+    #     observed_glyphs = observed_glyphs.long()
+    #     crop = self.glyph_crop(observed_glyphs, coordinates)
 
-        crop_emb = self._select(self.embed, crop)
-        crop_emb = crop_emb.transpose(1, 3)
-        crop_rep = self.extract_crop_representation(crop_emb)
-        crop_rep = crop_rep.view(B, -1)
-        reps.append(crop_rep)
+    #     crop_emb = self._select(self.embed, crop)
+    #     crop_emb = crop_emb.transpose(1, 3)
+    #     crop_rep = self.extract_crop_representation(crop_emb)
+    #     crop_rep = crop_rep.view(B, -1)
+    #     reps.append(crop_rep)
         
-        glyphs_emb = self._select(self.embed, observed_glyphs)
-        glyphs_emb = glyphs_emb.transpose(1, 3)
-        glyphs_rep = self.extract_representation(glyphs_emb)
-        glyphs_rep = glyphs_rep.view(B, -1)
-        reps.append(glyphs_rep)
+    #     glyphs_emb = self._select(self.embed, observed_glyphs)
+    #     glyphs_emb = glyphs_emb.transpose(1, 3)
+    #     glyphs_rep = self.extract_representation(glyphs_emb)
+    #     glyphs_rep = glyphs_rep.view(B, -1)
+    #     reps.append(glyphs_rep)
         
-        st = torch.cat(reps, dim=1)
-        st = self.fc_critic(st)
+    #     st = torch.cat(reps, dim=1)
+    #     st = self.fc_critic(st)
 
-        return st
+    #     return st

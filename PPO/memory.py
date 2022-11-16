@@ -1,8 +1,7 @@
-import gym
 import torch
 import minihack 
 from torch import nn
-import random, numpy as np
+import numpy as np
 from collections import deque
 
 
@@ -11,9 +10,9 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 class Memory():
     
-    def __init__(self):
+    def __init__(self, p_batch_size, buffer_size):
         
-        self.buffer = deque(maxlen = 10000)
+        self.buffer = deque(maxlen = p_batch_size * buffer_size)
         self.use_cuda = False
 
     def cache(self, state, next_state, action, reward, log_prob, done): #나중에 **kwargs로 바꿔보기 feat. JHJ
@@ -26,12 +25,9 @@ class Memory():
         self.buffer.append((gly, bls, next_gly, next_bls, torch.LongTensor([action]).to(device), torch.FloatTensor([reward]).to(device), torch.FloatTensor([log_prob]).to(device), torch.FloatTensor([done]).to(device)))
         
     
-    def sample(self, batch_size):
+    def sample(self):
 
-                
-
-        batch = random.sample(self.buffer, batch_size)
-        gly, bls, next_gly, next_bls, action, reward, log_prob, dones = map(torch.stack, zip(*batch)) 
+        gly, bls, next_gly, next_bls, action, reward, log_prob, dones = map(torch.stack, zip(*self.buffer)) 
 
         done_lst = []
         for i in range(len(dones)):
@@ -41,16 +37,13 @@ class Memory():
         done_lst = torch.tensor(done_lst, dtype = torch.float).to(device)
 
 
-        n_states = len(gly)
-        batch_start = np.arange(0, n_states, batch_size)
-        indices = np.arange(n_states, dtype=np.int64)
-        np.random.shuffle(indices)
-        batches = [indices[i:i+batch_size] for i in batch_start]
-
-        return gly, bls, next_gly, next_bls, action, reward, log_prob, done_lst, batches #squeeze? 
+        return gly, bls, next_gly, next_bls, action, reward, log_prob, done_lst #squeeze? 
     
 
     def len(self):
         return len(self.buffer)
+
+    def clear(self):
+        self.buffer.clear()
 
 
