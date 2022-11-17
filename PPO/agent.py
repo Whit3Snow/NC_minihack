@@ -7,8 +7,8 @@ from collections import deque
 from nle import nethack
 
 from torch.nn import functional as F
-from netPPO import PPO
-from memory import Memory
+from PPO.netPPO import PPO
+from PPO.memory import Memory
 
 from torch.utils.tensorboard import SummaryWriter
 from torch.distributions import Categorical
@@ -46,28 +46,38 @@ class Agent():
         self.batch_size = 32
         self.buffer_size = 1
         
-        #test
-        # if test == True:
-        #     self.actor = torch.load("distance_1/" + "model")
+        
+        if FLAGS.mode == "test":
+            self.actor = torch.load("PPO/" + FLAGS.model_dir)
 
+            self.env = gym.make(
+                    id = "MiniHack-Room-5x5-v0",
+                    observation_keys = ("glyphs","blstats"),
+                    actions =  MOVE_ACTIONS,)
+        else: 
+            # actor network 
+            self.actor = PPO(num_actions= self.env.action_space.n).to(device)
+            # critic network
+            self.critic = PPO(num_actions= self.env.action_space.n).to(device)
 
-        # actor network 
-        self.actor = PPO(num_actions= self.env.action_space.n).to(device)
-        # critic network
-        self.critic = PPO(num_actions= self.env.action_space.n).to(device)
+            self.memory = Memory(self.batch_size, self.buffer_size)
+            self.print_freq = self.batch_size * self.buffer_size  
 
-        self.memory = Memory(self.batch_size, self.buffer_size)
-        self.print_freq = self.batch_size * self.buffer_size  #640
-        self.save_freq = self.batch_size * self.buffer_size * 2
+            self.gamma = 0.99
+            self.lmbda = 0.95
+            self.episode = 10000
+            self.model_num = FLAGS.model_num
 
+            # initial optimize
+            self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr = 1e-4)
+            # self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr = 0.001)
 
-        self.gamma = 0.99
-        self.lmbda = 0.95
-        self.episode = 10000
+            # self.env = gym.vector.make(
+            #     id = "MiniHack-Room-5x5-v0",
+            #     observation_keys = ("glyphs","blstats"),
+            #     actions =  MOVE_ACTIONS,
+            #     num_envs = 3)
 
-        # initial optimize
-        self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr = 1e-4)
-        # self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr = 0.001)
 
 
     def get_action(self, obs):
@@ -135,7 +145,7 @@ class Agent():
                 value = self.critic.forward(gly_, bls_, False).float()
                 critic_loss = (return_ - value).pow(2).mean()
 
-                loss = (CRITIC_DISCOUNT * critic_loss) + actor_loss  # - (ENTROPY_BETA * entropy)
+                loss = (CRITIC_DISCOUNT * critic_loss) + actor_loss #- (ENTROPY_BETA * entropy)
                 
                 
                 self.actor_optimizer.zero_grad()
@@ -206,7 +216,7 @@ class Agent():
                 print("************************************************")
                 
                 if save % 50 == 0:
-                    torch.save(self.actor, "{}/model".format("test5") + str(save))
+                    torch.save(self.actor, "PPO/{}/model".format(self.model_num) + str(save))
 
                 self.writer.add_scalar("mean_reward", round(np.mean(e_rewards[-101:-1]), 2), len(e_rewards) / (self.buffer_size * self.batch_size))
                 self.writer.add_scalar("mean_steps", steps / (self.buffer_size * self.batch_size), len(e_rewards) / (self.buffer_size * self.batch_size))
@@ -217,19 +227,11 @@ class Agent():
                 e_rewards = [0.0]
                 action_steps = []
                 
-            #temp#
-
-
-            # if freq % self.save_freq == 0:
-            #     print("save the model!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-            #     torch.save(self.actor, "{}/model".format(self.model_num) + str(tot_steps))
-  
-
-
 
 
 
     np.set_printoptions(threshold=np.inf, linewidth=np.inf) #for debuger
+
     def test(self):
   
         actions = []
@@ -250,7 +252,7 @@ class Agent():
                 steps += 1
                 tot_steps += 1
                 # step
-                action = self.get_action(state)
+                action, dist = self.get_action(state)
                 actions.append(action.item())
                 new_state, reward, done, info =  env.step(action.item())
                 state = new_state
@@ -258,7 +260,7 @@ class Agent():
                 e_rewards[-1] += reward
 
             
-            print(actions)
+            print(actions, e_rewards[-1], len(actions))
             breakpoint()
             actions = []
 
@@ -266,7 +268,7 @@ class Agent():
             e_rewards.append(0.0)
         
             #logging
-            if len(e_rewards) % self.print_freq == 0 :
+            if len(e_rewards) % 20 == 0 :
 
                 print("************************************************")
                 print("means_steps: {} and tot_steps: {}".format(steps/25, tot_steps))
@@ -274,12 +276,5 @@ class Agent():
                 print("mean 100 episode reward: {}".format(round(np.mean(e_rewards[-101:-1]), 2)))
                 print("************************************************")
                 steps = 0
-
-agent = Agent()
-agent.train()
-# agent.test()
-
-    
-
 
         

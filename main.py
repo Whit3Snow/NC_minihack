@@ -47,7 +47,8 @@ def main():
     module = FLAGS.agent + ".agent" 
     name = "Agent"
     agent = getattr(importlib.import_module(module), name)(FLAGS) # import 하고 싶은 파일
-
+    # print("agent", agent)
+    # breakpoint()
     if FLAGS.mode == 'train':
         createFolder("./" + FLAGS.agent + "/" + FLAGS.model_num)
         agent.train()
