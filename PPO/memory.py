@@ -21,8 +21,9 @@ class Memory():
         bls = torch.FloatTensor(state['blstats']).to(device)
         next_gly = torch.FloatTensor(next_state['glyphs']).to(device)
         next_bls = torch.FloatTensor(next_state['blstats']).to(device)
-        
-        self.buffer.append((gly, bls, next_gly, next_bls, torch.LongTensor([action]).to(device), torch.FloatTensor([reward]).to(device), torch.FloatTensor([log_prob]).to(device), torch.FloatTensor([done]).to(device)))
+
+        # breakpoint()
+        self.buffer.append((gly, bls, next_gly, next_bls, torch.LongTensor(action.tolist()).to(device), torch.FloatTensor(reward).to(device), torch.FloatTensor(log_prob).to(device), torch.FloatTensor(done).to(device)))
         
     
     def sample(self):
@@ -30,12 +31,18 @@ class Memory():
         gly, bls, next_gly, next_bls, action, reward, log_prob, dones = map(torch.stack, zip(*self.buffer)) 
 
         done_lst = []
-        for i in range(len(dones)):
-            done = 0.0 if dones[i] else 1.0
-            done_lst.append([done])
 
-        done_lst = torch.tensor(done_lst, dtype = torch.float).to(device)
+        def versa(a):
+            return 1 - a
 
+        done_lst = list(map(versa, dones))
+     
+        # breakpoint()
+        # for i in range(len(dones)):
+        #     done = 0.0 if dones[i] else 1.0
+        #     done_lst.append([done])
+
+        done_lst = torch.stack(done_lst, dim = 0)
 
         return gly, bls, next_gly, next_bls, action, reward, log_prob, done_lst #squeeze? 
     

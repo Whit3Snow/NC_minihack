@@ -29,6 +29,8 @@ def main():
     parser.add_argument("--model_dir", type = str, help = "model 확인")
     parser.add_argument("--model_num", default = "model", type = str, help = "model 디렉토리 숫자")
     parser.add_argument("--lr", default = 1e-7, type = float, help = "just learning rate")
+    parser.add_argument("--num_actors", default = 10, type = int, help = "number of workers")
+
 
     parser.add_argument("--env", default = "MiniHack-Room-Random_curi-5x5-v0", type = str, help = "just gym environment by JHJ")
     '''

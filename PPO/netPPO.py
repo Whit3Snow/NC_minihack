@@ -134,6 +134,7 @@ class PPO(nn.Module):
             nn.ReLU(),
             nn.Linear(self.h_dim, self.num_actions),
             nn.Softmax(dim = -1) # agent가 각 행동을 취할 probability가 나오게 됨. 
+            #nn.LogSoftmax
         )
 
         self.fc_critic = nn.Sequential(
