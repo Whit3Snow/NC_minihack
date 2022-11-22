@@ -43,12 +43,12 @@ class Agent():
 
         self.writer = SummaryWriter()
 
-        self.batch_size = 32
-        self.buffer_size = 3
+        self.batch_size = 20
+        self.buffer_size = 1
         self.flags = FLAGS
         
         if FLAGS.mode == "test":
-            self.actor = torch.load("PPO/" + FLAGS.model_dir)
+            self.actor_critic = torch.load("PPO/" + FLAGS.model_dir)
 
             self.env = gym.make(
                     id = "MiniHack-Room-5x5-v0",
@@ -56,9 +56,9 @@ class Agent():
                     actions =  MOVE_ACTIONS,)
         else: 
             # actor network 
-            self.actor = PPO(num_actions= self.env.action_space.n).to(device)
+            self.actor_critic = PPO(num_actions= self.env.action_space.n).to(device)
             # critic network
-            self.critic = PPO(num_actions= self.env.action_space.n).to(device)
+            # self.critic = PPO(num_actions= self.env.action_space.n).to(device)
 
             self.memory = Memory(self.batch_size, self.buffer_size)
             self.print_freq = self.batch_size * self.buffer_size  
@@ -69,7 +69,7 @@ class Agent():
             self.model_num = FLAGS.model_num
 
             # initial optimize
-            self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr = 1e-4)
+            self.actor_optimizer = torch.optim.Adam(self.actor_critic.parameters(), lr = 1e-4)
             # self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr = 0.001)
             self.num_envs = FLAGS.num_actors
             
@@ -78,7 +78,7 @@ class Agent():
                 observation_keys = ("glyphs","blstats"),
                 actions =  MOVE_ACTIONS,
                 num_envs =  self.num_envs, # self.num_envs,
-                max_episode_steps= 30,
+                max_episode_steps= 20,
 
                 )
 
@@ -94,45 +94,61 @@ class Agent():
             observed_stats = torch.from_numpy(obs['blstats']).float().to(device)
 
         with torch.no_grad():
-            # breakpoint()
-            q = self.actor.forward(observed_glyphs,observed_stats, True)  
+            q = self.actor_critic.forward(observed_glyphs,observed_stats, True)  
 
         return q.sample(), q
+
+    def calc_advantage2(self, gly, bls, next_gly, next_bls, action, reward, done_mask):
+
+        batch_size = done_mask.shape[0]
+        value_old_state = self.actor_critic.forward(gly, bls, False).squeeze(1).detach()
+        value_new_state = self.actor_critic.forward(next_gly, next_bls, False).squeeze(1).detach()
+        advantage = np.zeros(batch_size + 1)
+
+        for t in reversed(range(batch_size)):
+            delta = reward[t] + (self.gamma * value_new_state[t] * done_mask[t]) - value_old_state[t]
+            advantage[t] = delta + (self.gamma * self.lmbda * advantage[t + 1] * done_mask[t])
+
+        advantage = torch.tensor(advantage[:batch_size], dtype=torch.float).to(device)
+        value_target = advantage[:batch_size] + np.squeeze(value_old_state)
+
+        return value_target, advantage[:batch_size]
 
 
 
     def calc_advantage(self, gly, bls, next_gly, next_bls, action, reward, done_mask):
-        
-
-       
-        # breakpoint()
 
         
-        values = self.critic.forward(gly, bls, False).detach()
-        td_target = reward + self.gamma * self.critic.forward(next_gly, next_bls, False) * done_mask
+        values = self.actor_critic.forward(gly, bls, False).squeeze(1).detach()
+        td_target = reward + self.gamma * self.actor_critic.forward(next_gly, next_bls, False).squeeze(1) * done_mask
         delta = td_target - values
+        
         delta = delta.detach().cpu().numpy()
         advantage_lst = []
         advantage = 0.0 
-        # delta = [[0.02968087] [0.02968087] [0.03968087]] ==> batch_size 
+
         for idx in reversed(range(len(delta))):
-            advantage = self.gamma * self.lmbda * advantage + delta[idx][0]
+            advantage = (self.gamma * self.lmbda * advantage) + delta[idx]
             advantage_lst.append([advantage])                                       
-    
+
         advantage_lst.reverse()
         advantages = torch.tensor(advantage_lst, dtype=torch.float).to(device)
-        return values + advantages, advantages
+        returns = values + advantages.squeeze(1)
+
+        return returns, advantages
         #values는 critic 모델
         #return = values + advantages
 
 
     def update(self):
-        clip_param = 0.2
+        clip_param = 0.1
         CRITIC_DISCOUNT = 0.5
         ENTROPY_BETA = 0.01
 
 
         gly, bls, next_gly, next_bls, action, reward, log_prob, done_mask = self.memory.sample()
+
+        # breakpoint()
 
         gly = gly.view([-1, 21, 79])
         bls = bls.view([-1, 26])
@@ -143,9 +159,9 @@ class Agent():
         log_prob = log_prob.reshape(self.flags.num_actors * self.batch_size * self.buffer_size)
         action = action.reshape(self.flags.num_actors * self.batch_size * self.buffer_size)
 
+        returns, advantages = self.calc_advantage2(gly, bls, next_gly, next_bls, action, reward, done_mask)# batch_size
         # breakpoint()
-        returns, advantages = self.calc_advantage(gly, bls, next_gly, next_bls, action, reward, done_mask)# batch_size
- 
+    
         PPO_epochs = 10
         n = self.buffer_size * self.batch_size
         arr = np.arange(n)
@@ -157,30 +173,42 @@ class Agent():
 
                 gly_, bls_, action_, old_log_probs, return_, advantage = gly[batch], bls[batch], action[batch], log_prob[batch], returns[batch], advantages[batch]
                 
-                dist = self.actor.forward(gly_, bls_, True)
+                dist = self.actor_critic.forward(gly_, bls_, True)
                 entropy = dist.entropy().mean()
-                # breakpoint()
-
                 new_probs = dist.log_prob(action_)
-                # breakpoint()
                 ratio = (new_probs - old_log_probs).exp()
 
                 surr1 = ratio * advantage
                 surr2 = torch.clamp(ratio, 1.0 - clip_param, 1.0 + clip_param) * advantage
                 actor_loss = -torch.min(surr1, surr2).mean()
 
-                value = self.critic.forward(gly_, bls_, False).float()
-                critic_loss = (return_ - value).pow(2).mean()
+                # breakpoint()
+
+                value = self.actor_critic.forward(gly_, bls_, False).float()
+                critic_loss = (return_ - value).pow(2).mean() # MSE_loss
 
                 loss = (CRITIC_DISCOUNT * critic_loss) + actor_loss #- (ENTROPY_BETA * entropy)
                 
-                
+                # for name,params in self.actor_critic.named_parameters():
+                #     print("name:", name)
+                #     print(params)
+                #     print("=========" * 8)
+                # breakpoint()
+
                 self.actor_optimizer.zero_grad()
                 # self.critic_optimizer.zero_grad()
-                
                 loss.backward()
+                nn.utils.clip_grad_norm_(self.actor_critic.parameters(), 1.0)
                 self.actor_optimizer.step()
+
+                # for name,params in self.critic.named_parameters():
+                #     print("name:", name)
+                #     print(params)
+                #     print("=========" * 8)
+                # breakpoint()
+
                 # self.critic_optimizer.step()
+            
 
         self.memory.clear()
 
@@ -206,13 +234,12 @@ class Agent():
 
         save = 0
         print_freq = 1
-        max_step = 40
+        max_step = 20
         state = env.reset() # each reset generates a new environment instance    
 
         while True:
-            state = env.reset()
-            # env.render("human")
-            for i in range(max_step):
+            
+            for mini_step in range(max_step):
 
                 step_s += 1
                 tot_steps += 1
@@ -227,13 +254,13 @@ class Agent():
                 log_prob = dist.log_prob(action).tolist()
                 self.memory.cache(state, new_state, action, reward, log_prob, done)
                 
-                if tot_steps % (self.buffer_size * self.batch_size) == 0:
+                if mini_step == max_step - 1:
                     loss.append(self.update())
 
                 state = new_state
 
                 steps = [x + y for x,y in zip(steps, step)] # num_envs
-                done_idx = [i for i,ele in enumerate(done) if ele==True]
+                done_idx = [i for i,ele in enumerate(done) if ele == True]
 
                 for k in done_idx:
                     done_steps.append(steps[k]) #envs에서 done된 것만 step 가져오기
@@ -244,6 +271,9 @@ class Agent():
             
             action_steps.append(n_steps)
             n_steps = 0
+
+            # print("n_steps: ",n_steps)
+            # print("len(done_rewards): ", len(done_rewards))
             # e_rewards.append(0.0)
 
             if len(done_rewards) // 100 > print_freq :
@@ -256,7 +286,7 @@ class Agent():
                 print("************************************************")
                 
                 if save % 50 == 0:
-                    torch.save(self.actor, "PPO/{}/model".format(self.model_num) + str(save))
+                    torch.save(self.actor_critic, "PPO/{}/model".format(self.model_num) + str(save))
 
                 # self.writer.add_scalar("mean_reward", round(np.mean(e_rewards[-101:-1]), 2), len(e_rewards) / (self.buffer_size * self.batch_size))
                 # self.writer.add_scalar("mean_steps", step_s / (self.buffer_size * self.batch_size), len(e_rewards) / (self.buffer_size * self.batch_size))
