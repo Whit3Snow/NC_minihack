@@ -19,7 +19,7 @@ def createFolder(directory):
 
 def main():    
     parser = argparse.ArgumentParser()
-    parser.add_argument('--episodes', default = '100000', type = int, help = '총 step수를 일컬음')
+    parser.add_argument('--episodes', default = '1000000', type = int, help = '총 step수를 일컬음')
     parser.add_argument('--mode', default = "test", type = str)
     parser.add_argument('--agent', default = "DQN", type = str)
     parser.add_argument('--eps-start', default = 0.9, type = float, help = "e-greedy 시작 값")
@@ -29,15 +29,16 @@ def main():
     parser.add_argument("--model_dir", type = str, help = "model 확인")
     parser.add_argument("--model_num", default = "model", type = str, help = "model 디렉토리 숫자")
     parser.add_argument("--lr", default = 1e-4, type = float, help = "just learning rate")
-    parser.add_argument("--num_actors", default = 4, type = int, help = "number of workers")
+    parser.add_argument("--num_actors", default = 3, type = int, help = "number of workers")
+    parser.add_argument("--debug", default= 1, type = int, help = "debugging or not")
 
-
-    parser.add_argument("--env", default = "MiniHack-Room-Random_curi-5x5-v0", type = str, help = "just gym environment by JHJ")
+    parser.add_argument("--env", default = "Minihack-CurriRoom-v0", type = str, help = "just gym environment by JHJ")
     '''
     # Goal env list 
         0. MiniHack-Room-5x5-v0
         1. MiniHack-Corridor-R2-v0
-        MiniHack-Room-Random_curi-5x5-v0
+        2. MiniHack-Room-Random_curi-5x5-v0
+        3. MiniHack-MultiRoom-N4-v0
 
     '''
     
